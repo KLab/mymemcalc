@@ -25,7 +25,9 @@ thread_buffers = {
                   'thread_stack'            : '256K',
                   }
 
-other_vars = {
+slave_buffers = {}
+
+cardinal_vars = {
               'max_connections' : '20',
              }
 
@@ -43,24 +45,27 @@ def _read_from_cnf(mycnf):
         if not parser.has_section('mysqld'):
             sys.exit('mysqld section does not exit. invalid my.cnf.')
 
-        keys = global_buffers.keys()
-        for k in keys:
+        for k in global_buffers.keys():
              if parser.has_option('mysqld', k):
                   global_buffers[k] = parser.get('mysqld', k)
              elif parser.has_option('mysqld', k.rstrip('_size')):
                   global_buffers[k] = parser.get('mysqld', k.rstrip('_size'))
 
-        keys = thread_buffers.keys()
-        for k in keys:
+        for k in thread_buffers.keys():
              if parser.has_option('mysqld', k):
                   thread_buffers[k] = parser.get('mysqld', k)
              elif parser.has_option('mysqld', k.rstrip('_size')):
                   thread_buffers[k] = parser.get('mysqld', k.rstrip('_size'))
                  
-        keys = other_vars.keys()
-        for k in keys:
+        for k in slave_buffers.keys():
              if parser.has_option('mysqld', k):
-                  other_vars[k] = parser.get('mysqld', k)
+                  slave_buffers[k] = parser.get('mysqld', k)
+             elif parser.has_option('mysqld', k.rstrip('_size')):
+                  slave_buffers[k] = parser.get('mysqld', k.rstrip('_size'))
+                 
+        for k in cardinal_vars.keys():
+             if parser.has_option('mysqld', k):
+                  cardinal_vars[k] = parser.get('mysqld', k)
                  
 def _read_from_vars():
     # 標準入力(show variables)読み込んで、デフォルト値を更新する
@@ -70,8 +75,10 @@ def _read_from_vars():
             global_buffers[var[0]] = var[1]
         elif thread_buffers.has_key(var[0]):
             thread_buffers[var[0]] = var[1]
-        elif other_vars.has_key(var[0]):
-            other_vars[var[0]] = var[1]
+        elif slave_buffers.has_key(var[0]):
+            slave_buffers[var[0]] = var[1]
+        elif cardinal_vars.has_key(var[0]):
+            cardinal_vars[var[0]] = var[1]
 
 def _show_global_buffers():
     #print '[global buffers]'
@@ -91,9 +98,18 @@ def _show_thread_buffers():
             print '  ' + k + ' = ' + _digit_to_SI(v) + '(' + v + ')'
     print
 
-def _show_other_vars():
-    print '[other variables]'
-    for k,v in other_vars.items():
+def _show_slave_buffers():
+    #print '[slave buffers]'
+    for k,v in slave_buffers.items():
+        if v.endswith(('K', 'M', 'G', 'T')):
+            print '  ' + k + ' = ' + v + '(' + str(_SI_to_int(v)) + ')'
+        else:
+            print '  ' + k + ' = ' + _digit_to_SI(v) + '(' + v + ')'
+    print
+
+def _show_cardinal_vars():
+    print '[cardinal_variables]'
+    for k,v in cardinal_vars.items():
         print '  ' + k + ' = ' + v 
     print
 
@@ -138,7 +154,13 @@ def _show_calc():
     for v in thread_buffers.values():
         thread_total += _SI_to_int(v)
 
-    total = global_total + (thread_total * int(other_vars['max_connections']))
+    total = global_total + (thread_total * int(cardinal_vars['max_connections']))
+
+    slave_total = 0
+    if options.version == '5.6':
+        for v in slave_buffers.values():
+            slave_total += _SI_to_int(v)
+        total += slave_total * int(cardinal_vars['slave_parallel_workers'])
    
     print '[required_memory] = ' + _digit_to_SI(str(total)) + '(' + str(total) + ')'
     print 
@@ -146,20 +168,24 @@ def _show_calc():
     _show_global_buffers()
     print '[thread_total] = ' + str(thread_total)
     _show_thread_buffers()
-    print '[max_connections] = ' + other_vars['max_connections']
-    print
+    if options.version == '5.6':
+        print '[slave_total] = ' + str(slave_total)
+        _show_slave_buffers()
+    _show_cardinal_vars()
 
 
 if __name__ == '__main__':
     usage = "usage: %prog [options] my_cnf_file\n"
     usage += "     : mysql -e 'show variables' | %prog [options]"
     parser = OptionParser(usage)
-    parser.add_option("-v", dest="version", help="Mysql version. support 5.5 or 5.6. default = 5.5(=5.1).")
+    parser.add_option("-v", dest="version", help="Mysql version. support 5.5 or 5.6. default=5.5(=5.1).")
     options, args = parser.parse_args()
 
     if options.version == '5.6':
         del global_buffers['innodb_additional_mem_pool_size']
         global_buffers['query_cache_size'] = '1M'
+        cardinal_vars['slave_parallel_workers'] = '0'
+        slave_buffers['slave_pending_jobs_size_max'] = '16M'
 
     if len(args) > 1:
         parser.print_help()
@@ -174,7 +200,10 @@ if __name__ == '__main__':
         sys.exit(e)
 
     print '*** minimum memory requirement fomula ***'
-    print '[required_memory] = [global_buffers] + ([thread_buffers] * [max_connections])'
+    if options.version == '5.6':
+        print '[required_memory] = [global_total] + ([thread_total] * max_connections) + ([slave_total] * slave_parallel_workers)'
+    else:
+        print '[required_memory] = [global_total] + ([thread_total] * max_connections)'
     print
 
     print '*** result ***'
