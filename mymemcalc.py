@@ -3,7 +3,10 @@
 
 from optparse import OptionParser
 import sys
-import ConfigParser
+try:
+    import configparser
+except ImportError:
+    import ConfigParser as configparser
 
 global_buffers = {
                   'key_buffer_size'                 : '8M',
@@ -38,9 +41,9 @@ T = 1024.0 ** 4
 P = 1024.0 ** 5
 
 def _read_from_cnf(mycnf):
-    # my.cnfを読み出して設定されていたらデフォルト値を更新する
+    # change values from default to my.cnf
     with open(mycnf) as cnf:
-        parser = ConfigParser.SafeConfigParser(allow_no_value=True)
+        parser = configparser.SafeConfigParser(allow_no_value=True)
         parser.readfp(cnf)
         if not parser.has_section('mysqld'):
             sys.exit('mysqld section does not exit. invalid my.cnf.')
@@ -68,50 +71,47 @@ def _read_from_cnf(mycnf):
                   cardinal_vars[k] = parser.get('mysqld', k)
                  
 def _read_from_vars():
-    # 標準入力(show variables)読み込んで、デフォルト値を更新する
+    # change values from default to stdin(show variables)
     for line in sys.stdin:
         var = line.split()
-        if global_buffers.has_key(var[0]):
+        if var[0] in global_buffers:
             global_buffers[var[0]] = var[1]
-        elif thread_buffers.has_key(var[0]):
+        elif var[0] in thread_buffers:
             thread_buffers[var[0]] = var[1]
-        elif slave_buffers.has_key(var[0]):
+        elif var[0] in slave_buffers:
             slave_buffers[var[0]] = var[1]
-        elif cardinal_vars.has_key(var[0]):
+        elif var[0] in cardinal_vars:
             cardinal_vars[var[0]] = var[1]
 
 def _show_global_buffers():
-    #print '[global buffers]'
-    for k,v in global_buffers.items():
+    for k,v in sorted(global_buffers.items(), key=lambda x: x[0]): 
         if v.endswith(('K', 'M', 'G', 'T')):
-            print '  ' + k + ' = ' + v + '(' + str(_SI_to_int(v)) + ')'
+            print('  ' + k + ' = ' + v + '(' + str(_SI_to_int(v)) + ')')
         else:
-            print '  ' + k + ' = ' + _digit_to_SI(v) + '(' + v + ')'
-    print
+            print('  ' + k + ' = ' + _digit_to_SI(v) + '(' + v + ')')
+    print('')
 
 def _show_thread_buffers():
-    #print '[thread buffers]'
-    for k,v in thread_buffers.items():
+    for k,v in sorted(thread_buffers.items(), key=lambda x: x[0]):
         if v.endswith(('K', 'M', 'G', 'T')):
-            print '  ' + k + ' = ' + v + '(' + str(_SI_to_int(v)) + ')'
+            print('  ' + k + ' = ' + v + '(' + str(_SI_to_int(v)) + ')')
         else:
-            print '  ' + k + ' = ' + _digit_to_SI(v) + '(' + v + ')'
-    print
+            print('  ' + k + ' = ' + _digit_to_SI(v) + '(' + v + ')')
+    print('')
 
 def _show_slave_buffers():
-    #print '[slave buffers]'
     for k,v in slave_buffers.items():
         if v.endswith(('K', 'M', 'G', 'T')):
-            print '  ' + k + ' = ' + v + '(' + str(_SI_to_int(v)) + ')'
+            print('  ' + k + ' = ' + v + '(' + str(_SI_to_int(v)) + ')')
         else:
-            print '  ' + k + ' = ' + _digit_to_SI(v) + '(' + v + ')'
-    print
+            print('  ' + k + ' = ' + _digit_to_SI(v) + '(' + v + ')')
+    print('')
 
 def _show_cardinal_vars():
-    print '[cardinal_variables]'
+    print('[cardinal_variables]')
     for k,v in cardinal_vars.items():
-        print '  ' + k + ' = ' + v 
-    print
+        print('  ' + k + ' = ' + v)
+    print('')
 
 def _SI_to_int(val):
     if val.endswith('K'):
@@ -162,14 +162,14 @@ def _show_calc():
             slave_total += _SI_to_int(v)
         total += slave_total * int(cardinal_vars['slave_parallel_workers'])
    
-    print '[required_memory] = ' + _digit_to_SI(str(total)) + '(' + str(total) + ')'
-    print 
-    print '[global_total] = ' + str(global_total)
+    print('[required_memory] = ' + _digit_to_SI(str(total)) + '(' + str(total) + ')')
+    print('')
+    print('[global_total] = ' + str(global_total))
     _show_global_buffers()
-    print '[thread_total] = ' + str(thread_total)
+    print('[thread_total] = ' + str(thread_total))
     _show_thread_buffers()
     if options.version == '5.6':
-        print '[slave_total] = ' + str(slave_total)
+        print('[slave_total] = ' + str(slave_total))
         _show_slave_buffers()
     _show_cardinal_vars()
 
@@ -189,28 +189,26 @@ if __name__ == '__main__':
 
     if len(args) > 1:
         parser.print_help()
-        #parser.error('incorrect number of arguments.')
 
     try:
         if len(args) == 1:
             _read_from_cnf(args[0])
         else:
             _read_from_vars()
-    except Exception, e:
+    except Exception as e:
         sys.exit(e)
 
-    print '*** minimum memory requirement fomula ***'
+    print('*** minimum memory requirement fomula ***')
     if options.version == '5.6':
-        print '[required_memory] = [global_total] + ([thread_total] * max_connections) + ([slave_total] * slave_parallel_workers)'
+        print('[required_memory] = [global_total] + ([thread_total] * max_connections) + ([slave_total] * slave_parallel_workers)')
     else:
-        print '[required_memory] = [global_total] + ([thread_total] * max_connections)'
-    print
+        print('[required_memory] = [global_total] + ([thread_total] * max_connections)')
+    print('')
 
-    print '*** result ***'
+    print('*** result ***')
     try:
         _show_calc()
-    except (ValueError, TypeError), e:
-        print 'value is invalid.'
+    except (ValueError, TypeError) as e:
+        print('value is invalid.')
         sys.exit(e)
-
 
